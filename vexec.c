@@ -11,9 +11,14 @@ int main(int argc, char *argv[]) {
 
     char **command = &argv[1];
 
-    pid_t pid;
+    int pipes_out[2], pipes_err[2];
 
-    pid = fork();
+    if (pipe(pipes_out) == -1 || pipe(pipes_err) == -1) {
+        perror("pipe");
+        return errno;
+    }
+
+    pid_t pid = fork();
 
     if (pid < 0) {
         perror("fork");
@@ -22,6 +27,13 @@ int main(int argc, char *argv[]) {
 
     if (pid == 0) {
         // child process
+        close(pipes_out[0]);
+        close(pipes_err[0]);
+        close(fileno(stdout));
+        close(fileno(stderr));
+        dup2(pipes_out[1], fileno(stdout));
+        dup2(pipes_err[1], fileno(stderr));
+
         execvp(command[0], command);
 
         // comes here only when failed
@@ -30,6 +42,17 @@ int main(int argc, char *argv[]) {
     }
 
     // parent process
+    close(pipes_out[1]);
+    close(pipes_err[1]);
+    int child_out = pipes_out[0];
+    int child_err = pipes_err[0];
+    close(fileno(stdin)); // stdin will be read by the child process
+
+    char buf[256];
+    int read_size;
+    read_size = read(child_out, buf, sizeof(buf));
+    printf("%s", buf);
+
     int status;
     int w = waitpid(pid, &status, 0);
 
