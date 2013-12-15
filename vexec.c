@@ -15,14 +15,14 @@ int main(int argc, char *argv[]) {
 
     if (pipe(pipes_out) == -1 || pipe(pipes_err) == -1) {
         perror("pipe");
-        return errno;
+        return -1;
     }
 
     pid_t pid = fork();
 
     if (pid < 0) {
         perror("fork");
-        return errno;
+        return -1;
     }
 
     if (pid == 0) {
@@ -38,7 +38,7 @@ int main(int argc, char *argv[]) {
 
         // comes here only when failed
         perror(command[0]);
-        return errno;
+        return -1;
     }
 
     // parent process
@@ -58,21 +58,16 @@ int main(int argc, char *argv[]) {
 
     if (w == -1) {
         perror("waitpid");
-        return errno;
+        return -1;
     }
-
     if (WIFEXITED(status)) {
-        printf("finished\n");
         return 0;
     }
-
     if (WIFSIGNALED(status)) {
-        printf("finished by signal %d\n", WTERMSIG(status));
         return 0;
     }
 
-    printf("exited\n");
-    return WEXITSTATUS(status);
-
+    fprintf(stderr, "unexpectedly exited\n");
+    return -1;
 }
 
