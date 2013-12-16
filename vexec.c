@@ -3,9 +3,27 @@
 #include <errno.h>
 #include <sys/wait.h>
 
+int wait_and_exit(pid_t pid) {
+    int status;
+
+    if (-1 == waitpid(pid, &status, 0)) {
+        perror("waitpid");
+        return -1;
+    }
+    if (WIFEXITED(status)) {
+        return 0;
+    }
+    if (WIFSIGNALED(status)) {
+        return 0;
+    }
+
+    fprintf(stderr, "unexpectedly exited\n");
+    return -1;
+}
+
 int main(int argc, char *argv[]) {
     if (argc < 2) {
-        fprintf(stderr, "please pass at least one argument");
+        fprintf(stderr, "please pass at least one argument\n");
         return -1;
     }
 
@@ -53,21 +71,6 @@ int main(int argc, char *argv[]) {
     read_size = read(child_out, buf, sizeof(buf));
     printf("%s", buf);
 
-    int status;
-    int w = waitpid(pid, &status, 0);
-
-    if (w == -1) {
-        perror("waitpid");
-        return -1;
-    }
-    if (WIFEXITED(status)) {
-        return 0;
-    }
-    if (WIFSIGNALED(status)) {
-        return 0;
-    }
-
-    fprintf(stderr, "unexpectedly exited\n");
-    return -1;
+    return wait_and_exit(pid);
 }
 
