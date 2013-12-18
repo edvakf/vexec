@@ -2,8 +2,112 @@
 #include <stdio.h>
 #include <errno.h>
 #include <sys/wait.h>
+#include <pthread.h>
 
-int wait_and_exit(pid_t pid) {
+#define BYTES_TO_READ 1
+
+#define ANSI_COLOR_RED     "\x1b[31m"
+#define ANSI_COLOR_GREEN   "\x1b[32m"
+#define ANSI_COLOR_YELLOW  "\x1b[33m"
+#define ANSI_COLOR_BLUE    "\x1b[34m"
+#define ANSI_COLOR_MAGENTA "\x1b[35m"
+#define ANSI_COLOR_CYAN    "\x1b[36m"
+#define ANSI_COLOR_RESET   "\x1b[0m"
+
+typedef struct {
+    int child_out;
+    int child_err;
+    int mode; /* 1 = out, 2 = err, 0 = neither*/
+    pthread_rwlock_t lock;
+} vexec_env_t;
+
+void *cb_out_reader(void *arg) {
+    vexec_env_t *env = (vexec_env_t *)arg;
+    FILE *stream = fdopen(env->child_out, "r");
+    size_t size;
+    char *buf[BYTES_TO_READ];
+    while (1) {
+        pthread_rwlock_wrlock(&env->lock);
+        size = fread(buf, 1, BYTES_TO_READ, stream);
+        if (size == 0) {
+            if (feof(stream)) {
+                if (env->mode == 1) {
+                    fprintf(stdout, "%s", ANSI_COLOR_RESET);
+                    env->mode = 0;
+                }
+                pthread_rwlock_unlock(&env->lock);
+                break;
+            }
+            if (ferror(stream)) {
+                if (env->mode == 1) {
+                    fprintf(stdout, "%s", ANSI_COLOR_RESET);
+                    env->mode = 0;
+                }
+                fprintf(stderr, "fread failed (child_out)\n");
+                pthread_rwlock_unlock(&env->lock);
+                break;
+            }
+            pthread_rwlock_unlock(&env->lock);
+            continue;
+        }
+        if (env->mode != 1) {
+            fprintf(stdout, "%s", ANSI_COLOR_GREEN);
+            env->mode = 1;
+        }
+        fwrite(buf, size, 1, stdout);
+        if (size != BYTES_TO_READ) {
+            fprintf(stdout, "%s", ANSI_COLOR_RESET);
+            env->mode = 0;
+        }
+        pthread_rwlock_unlock(&env->lock);
+    }
+    return NULL;
+}
+
+void *cb_err_reader(void *arg) {
+    vexec_env_t *env = (vexec_env_t *)arg;
+    FILE *stream = fdopen(env->child_err, "r");
+    size_t size;
+    char *buf[BYTES_TO_READ];
+    while (1) {
+        pthread_rwlock_wrlock(&env->lock);
+        size = fread(buf, 1, BYTES_TO_READ, stream);
+        if (size == 0) {
+            if (feof(stream)) {
+                if (env->mode == 2) {
+                    fprintf(stdout, "%s", ANSI_COLOR_RESET);
+                    env->mode = 0;
+                }
+                pthread_rwlock_unlock(&env->lock);
+                break;
+            }
+            if (ferror(stream)) {
+                if (env->mode == 2) {
+                    fprintf(stdout, "%s", ANSI_COLOR_RESET);
+                    env->mode = 0;
+                }
+                fprintf(stderr, "fread failed (child_err)\n");
+                pthread_rwlock_unlock(&env->lock);
+                break;
+            }
+            pthread_rwlock_unlock(&env->lock);
+            continue;
+        }
+        if (env->mode != 2) {
+            fprintf(stdout, "%s", ANSI_COLOR_RED);
+            env->mode = 2;
+        }
+        fwrite(buf, size, 1, stdout);
+        if (size != BYTES_TO_READ) {
+            fprintf(stdout, "%s", ANSI_COLOR_RESET);
+            env->mode = 0;
+        }
+        pthread_rwlock_unlock(&env->lock);
+    }
+    return NULL;
+}
+
+int wait_for_child(pid_t pid) {
     int status;
 
     if (-1 == waitpid(pid, &status, 0)) {
@@ -66,11 +170,27 @@ int main(int argc, char *argv[]) {
     int child_err = pipes_err[0];
     close(fileno(stdin)); // stdin will be read by the child process
 
-    char buf[256];
-    int read_size;
-    read_size = read(child_out, buf, sizeof(buf));
-    printf("%s", buf);
+    pthread_t th_out_reader, th_err_reader;
 
-    return wait_and_exit(pid);
+    vexec_env_t *env;
+    env->child_out = child_out;
+    env->child_err = child_err;
+    env->mode = 0;
+    pthread_rwlock_init(&env->lock, NULL);
+
+    if (-1 == pthread_create(&th_out_reader, NULL, cb_out_reader, env) ||
+        -1 == pthread_create(&th_err_reader, NULL, cb_err_reader, env)) {
+        fprintf(stderr, "pthread_create failed\n");
+        return -1;
+    }
+
+    if (-1 == wait_for_child(pid)) {
+        return -1;
+    }
+    if (0 != pthread_join(th_out_reader, NULL) || 0 != pthread_join(th_err_reader, NULL)) {
+        fprintf(stderr, "could not properly join threads");
+        return -1;
+    }
+    return 0;
 }
 
