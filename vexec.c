@@ -178,14 +178,14 @@ int main(int argc, char *argv[]) {
 
     pthread_t th_out_reader, th_err_reader;
 
-    vexec_env_t *env;
-    env->child_out = child_out;
-    env->child_err = child_err;
-    env->mode = VEXEC_MODE_NEITHER;
-    pthread_rwlock_init(&env->lock, NULL);
+    vexec_env_t env;
+    env.child_out = child_out;
+    env.child_err = child_err;
+    env.mode = VEXEC_MODE_NEITHER;
+    pthread_rwlock_init(&env.lock, NULL);
 
-    if (-1 == pthread_create(&th_out_reader, NULL, cb_out_reader, env) ||
-        -1 == pthread_create(&th_err_reader, NULL, cb_err_reader, env)) {
+    if (-1 == pthread_create(&th_out_reader, NULL, cb_out_reader, &env) ||
+        -1 == pthread_create(&th_err_reader, NULL, cb_err_reader, &env)) {
         fprintf(stderr, "pthread_create failed\n");
         return -1;
     }
