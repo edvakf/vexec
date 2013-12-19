@@ -4,7 +4,7 @@
 #include <sys/wait.h>
 #include <pthread.h>
 
-#define BYTES_TO_READ 1
+#define BYTES_TO_READ 256
 
 #define ANSI_COLOR_RED     "\x1b[31m"
 #define ANSI_COLOR_GREEN   "\x1b[32m"
@@ -29,40 +29,29 @@ typedef struct {
 
 void *cb_out_reader(void *arg) {
     vexec_env_t *env = (vexec_env_t *)arg;
-    FILE *stream = fdopen(env->child_out, "r");
-    size_t size;
+    int pipe = env->child_out;
+    int size;
     char *buf[BYTES_TO_READ];
     while (1) {
         pthread_rwlock_wrlock(&env->lock);
-        size = fread(buf, 1, BYTES_TO_READ, stream);
+        size = read(pipe, buf, BYTES_TO_READ);
         if (size == 0) {
-            if (feof(stream)) {
-                if (env->mode == VEXEC_MODE_OUT) {
-                    fprintf(stdout, "%s", ANSI_COLOR_RESET);
-                    env->mode = VEXEC_MODE_NEITHER;
-                }
-                pthread_rwlock_unlock(&env->lock);
-                break;
-            }
-            if (ferror(stream)) {
-                if (env->mode == VEXEC_MODE_OUT) {
-                    fprintf(stdout, "%s", ANSI_COLOR_RESET);
-                    env->mode = VEXEC_MODE_NEITHER;
-                }
-                fprintf(stderr, "fread failed (child_out)\n");
-                pthread_rwlock_unlock(&env->lock);
-                break;
-            }
+            write(fileno(stdout), ANSI_COLOR_RESET, 4);
             pthread_rwlock_unlock(&env->lock);
-            continue;
+            break;
+        } else if (size < 0) {
+            write(fileno(stdout), ANSI_COLOR_RESET, 4);
+            fprintf(stderr, "fread failed (child_out)\n");
+            pthread_rwlock_unlock(&env->lock);
+            break;
         }
         if (env->mode != VEXEC_MODE_OUT) {
-            fprintf(stdout, "%s", ANSI_COLOR_GREEN);
+            write(fileno(stdout), ANSI_COLOR_GREEN, 5);
             env->mode = VEXEC_MODE_OUT;
         }
-        fwrite(buf, size, 1, stdout);
+        write(fileno(stdout), buf, size);
         if (size != BYTES_TO_READ) {
-            fprintf(stdout, "%s", ANSI_COLOR_RESET);
+            write(fileno(stdout), ANSI_COLOR_RESET, 4);
             env->mode = VEXEC_MODE_NEITHER;
         }
         pthread_rwlock_unlock(&env->lock);
@@ -72,40 +61,29 @@ void *cb_out_reader(void *arg) {
 
 void *cb_err_reader(void *arg) {
     vexec_env_t *env = (vexec_env_t *)arg;
-    FILE *stream = fdopen(env->child_err, "r");
-    size_t size;
+    int pipe = env->child_err;
+    int size;
     char *buf[BYTES_TO_READ];
     while (1) {
         pthread_rwlock_wrlock(&env->lock);
-        size = fread(buf, 1, BYTES_TO_READ, stream);
+        size = read(pipe, buf, BYTES_TO_READ);
         if (size == 0) {
-            if (feof(stream)) {
-                if (env->mode == VEXEC_MODE_ERR) {
-                    fprintf(stdout, "%s", ANSI_COLOR_RESET);
-                    env->mode = VEXEC_MODE_NEITHER;
-                }
-                pthread_rwlock_unlock(&env->lock);
-                break;
-            }
-            if (ferror(stream)) {
-                if (env->mode == VEXEC_MODE_ERR) {
-                    fprintf(stdout, "%s", ANSI_COLOR_RESET);
-                    env->mode = VEXEC_MODE_NEITHER;
-                }
-                fprintf(stderr, "fread failed (child_err)\n");
-                pthread_rwlock_unlock(&env->lock);
-                break;
-            }
+            write(fileno(stdout), ANSI_COLOR_RESET, 4);
             pthread_rwlock_unlock(&env->lock);
-            continue;
+            break;
+        } else if (size < 0) {
+            write(fileno(stdout), ANSI_COLOR_RESET, 4);
+            fprintf(stderr, "fread failed (child_err)\n");
+            pthread_rwlock_unlock(&env->lock);
+            break;
         }
         if (env->mode != VEXEC_MODE_ERR) {
-            fprintf(stdout, "%s", ANSI_COLOR_RED);
+            write(fileno(stderr), ANSI_COLOR_RED, 5);
             env->mode = VEXEC_MODE_ERR;
         }
-        fwrite(buf, size, 1, stdout);
+        write(fileno(stderr), buf, size);
         if (size != BYTES_TO_READ) {
-            fprintf(stdout, "%s", ANSI_COLOR_RESET);
+            write(fileno(stderr), ANSI_COLOR_RESET, 4);
             env->mode = VEXEC_MODE_NEITHER;
         }
         pthread_rwlock_unlock(&env->lock);
