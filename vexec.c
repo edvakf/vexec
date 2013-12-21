@@ -4,6 +4,7 @@
 #include <sys/wait.h>
 #include <pthread.h>
 #include <stdlib.h>
+#include <fcntl.h>
 
 #define BUFSIZE 8
 
@@ -53,8 +54,12 @@ void pipe_reader(vexec_env_t *env, int pipe, vexec_mode mode) {
             pthread_rwlock_unlock(&env->lock);
             break;
         } else if (size < 0) {
-            pthread_rwlock_unlock(&env->lock);
+            if (EAGAIN == errno || EWOULDBLOCK == errno) {
+                pthread_rwlock_unlock(&env->lock);
+                continue;
+            }
             fprintf(stderr, "fread failed\n");
+            pthread_rwlock_unlock(&env->lock);
             break;
         }
         env->buflist.current->size = (size_t)size;
@@ -142,6 +147,8 @@ int main(int argc, char *argv[]) {
     close(pipes_err[1]);
     int child_out = pipes_out[0];
     int child_err = pipes_err[0];
+    fcntl(child_out, F_SETFL, O_NONBLOCK);
+    fcntl(child_err, F_SETFL, O_NONBLOCK);
     close(fileno(stdin)); // stdin will be read by the child process
 
     pthread_t th_out_reader, th_err_reader;
