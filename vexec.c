@@ -180,8 +180,8 @@ int main(int argc, char *argv[]) {
     close(pipes_err[1]);
     int child_out = pipes_out[0];
     int child_err = pipes_err[0];
-    fcntl(child_out, F_SETFL, O_NONBLOCK);
-    fcntl(child_err, F_SETFL, O_NONBLOCK);
+    fcntl(child_out, F_SETFL, fcntl(child_out, F_GETFL) | O_NONBLOCK);
+    fcntl(child_err, F_SETFL, fcntl(child_err, F_GETFL) | O_NONBLOCK);
     close(fileno(stdin)); // stdin will be read by the child process
 
     pthread_t th_out_reader, th_err_reader, th_writer;
