@@ -44,6 +44,7 @@ typedef struct {
     int child_err;
     vexec_buflist_t buflist;
     pthread_rwlock_t lock;
+    int read_status;
 } vexec_env_t;
 
 void pipe_reader(vexec_env_t *env, int pipe, vexec_mode mode) {
@@ -51,6 +52,7 @@ void pipe_reader(vexec_env_t *env, int pipe, vexec_mode mode) {
         pthread_rwlock_wrlock(&env->lock);
         ssize_t size = read(pipe, env->buflist.current->buf, BUFSIZE);
         if (size == 0) {
+            env->read_status--;
             pthread_rwlock_unlock(&env->lock);
             break;
         } else if (size < 0) {
@@ -59,6 +61,7 @@ void pipe_reader(vexec_env_t *env, int pipe, vexec_mode mode) {
                 continue;
             }
             fprintf(stderr, "fread failed\n");
+            env->read_status--;
             pthread_rwlock_unlock(&env->lock);
             break;
         }
@@ -83,6 +86,36 @@ void *cb_err_reader(void *arg) {
     vexec_env_t *env = (vexec_env_t *)arg;
     int pipe = env->child_err;
     pipe_reader(env, pipe, VEXEC_MODE_ERR);
+    return NULL;
+}
+
+void *cb_writer(void *arg) {
+    vexec_env_t *env = (vexec_env_t *)arg;
+    vexec_mode mode = VEXEC_MODE_NEITHER;
+    while (1) {
+        pthread_rwlock_wrlock(&env->lock);
+        while (env->buflist.current != env->buflist.head) {
+            if (mode != env->buflist.head->mode) {
+                if (VEXEC_MODE_OUT == env->buflist.head->mode) {
+                    printf("%s", ANSI_COLOR_GREEN);
+                } else if (VEXEC_MODE_ERR == env->buflist.head->mode) {
+                    printf("%s", ANSI_COLOR_RED);
+                }
+                mode = env->buflist.head->mode;
+            }
+            fwrite(env->buflist.head->buf, env->buflist.head->size, 1, stdout);
+            env->buflist.tail = env->buflist.tail->next = env->buflist.head;
+            env->buflist.head = env->buflist.head->next;
+            env->buflist.tail->next = NULL;
+        }
+        if (0 == env->read_status) {
+            pthread_rwlock_unlock(&env->lock);
+            break;
+        }
+        pthread_rwlock_unlock(&env->lock);
+        usleep(100000);
+    }
+    printf("%s", ANSI_COLOR_RESET);
     return NULL;
 }
 
@@ -151,16 +184,18 @@ int main(int argc, char *argv[]) {
     fcntl(child_err, F_SETFL, O_NONBLOCK);
     close(fileno(stdin)); // stdin will be read by the child process
 
-    pthread_t th_out_reader, th_err_reader;
+    pthread_t th_out_reader, th_err_reader, th_writer;
 
     vexec_env_t env;
     env.child_out = child_out;
     env.child_err = child_err;
     env.buflist.head = env.buflist.tail = env.buflist.current = alloc_vexec_buflist_item();
+    env.read_status = 2;
     pthread_rwlock_init(&env.lock, NULL);
 
     if (-1 == pthread_create(&th_out_reader, NULL, cb_out_reader, &env) ||
-        -1 == pthread_create(&th_err_reader, NULL, cb_err_reader, &env)) {
+        -1 == pthread_create(&th_err_reader, NULL, cb_err_reader, &env) ||
+        -1 == pthread_create(&th_writer, NULL, cb_writer, &env)) {
         fprintf(stderr, "pthread_create failed\n");
         return -1;
     }
@@ -168,27 +203,11 @@ int main(int argc, char *argv[]) {
     if (-1 == wait_for_child(pid)) {
         return -1;
     }
-    if (0 != pthread_join(th_out_reader, NULL) || 0 != pthread_join(th_err_reader, NULL)) {
+    if (0 != pthread_join(th_out_reader, NULL) ||
+        0 != pthread_join(th_err_reader, NULL) ||
+        0 != pthread_join(th_writer, NULL)) {
         fprintf(stderr, "could not properly join threads");
         return -1;
-    }
-    vexec_mode mode = VEXEC_MODE_NEITHER;
-    while(1) {
-        if (env.buflist.head == env.buflist.current) {
-            break;
-        }
-        if (mode != env.buflist.head->mode) {
-            if (VEXEC_MODE_OUT == env.buflist.head->mode) {
-                printf("%s", ANSI_COLOR_GREEN);
-            } else if (VEXEC_MODE_ERR == env.buflist.head->mode) {
-                printf("%s", ANSI_COLOR_RED);
-            }
-            mode = env.buflist.head->mode;
-        }
-        fwrite(env.buflist.head->buf, env.buflist.head->size, 1, stdout);
-        env.buflist.tail = env.buflist.tail->next = env.buflist.head;
-        env.buflist.head = env.buflist.head->next;
-        env.buflist.tail->next = NULL;
     }
     printf("%s", ANSI_COLOR_RESET);
     return 0;
