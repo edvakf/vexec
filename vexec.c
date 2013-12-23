@@ -26,7 +26,8 @@ typedef struct {
     int exit_status;
 } vexec_env_t;
 
-void child_out_readable_cb(struct ev_loop *loop, ev_io *w, int revents) {
+void handle_child_readable(
+        struct ev_loop *loop, ev_io *w, int revents, vexec_mode mode, const char *esc) {
     vexec_env_t *env = (vexec_env_t *)ev_userdata(loop);
     char *buf[BUFSIZE];
     ssize_t size = read(w->fd, buf, BUFSIZE);
@@ -49,41 +50,19 @@ void child_out_readable_cb(struct ev_loop *loop, ev_io *w, int revents) {
         ev_io_stop(loop, w);
         return;
     }
-    if (env->mode != VEXEC_MODE_OUT) {
-        fprintf(stdout, ANSI_COLOR_GREEN);
-        env->mode = VEXEC_MODE_OUT;
+    if (env->mode != mode) {
+        fprintf(stdout, "%s", esc);
+        env->mode = mode;
     }
     fwrite(buf, size, 1, stdout);
 }
 
+void child_out_readable_cb(struct ev_loop *loop, ev_io *w, int revents) {
+    handle_child_readable(loop, w, revents, VEXEC_MODE_OUT, ANSI_COLOR_GREEN);
+}
+
 void child_err_readable_cb(struct ev_loop *loop, ev_io *w, int revents) {
-    vexec_env_t *env = (vexec_env_t *)ev_userdata(loop);
-    char *buf[BUFSIZE];
-    ssize_t size = read(w->fd, buf, BUFSIZE);
-    if (size == 0) {
-        if (env->mode != VEXEC_MODE_NEITHER) {
-            fprintf(stdout, ANSI_COLOR_RESET);
-            env->mode = VEXEC_MODE_NEITHER;
-        }
-        ev_io_stop(loop, w);
-        return;
-    } else if (size < 0) {
-        if (EAGAIN == errno || EWOULDBLOCK == errno) {
-            return;
-        }
-        if (env->mode != VEXEC_MODE_NEITHER) {
-            fprintf(stdout, ANSI_COLOR_RESET);
-            env->mode = VEXEC_MODE_NEITHER;
-        }
-        fprintf(stderr, "fread failed\n");
-        ev_io_stop(loop, w);
-        return;
-    }
-    if (env->mode != VEXEC_MODE_ERR) {
-        fprintf(stdout, ANSI_COLOR_RED);
-        env->mode = VEXEC_MODE_ERR;
-    }
-    fwrite(buf, size, 1, stdout);
+    handle_child_readable(loop, w, revents, VEXEC_MODE_ERR, ANSI_COLOR_RED);
 }
 
 void child_status_change_cb(struct ev_loop *loop, ev_child *w, int revents) {
