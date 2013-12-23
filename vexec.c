@@ -15,42 +15,74 @@
 #define ANSI_COLOR_CYAN    "\x1b[36m"
 #define ANSI_COLOR_RESET   "\x1b[0m"
 
+typedef enum {
+    VEXEC_MODE_OUT,
+    VEXEC_MODE_ERR,
+    VEXEC_MODE_NEITHER,
+} vexec_mode;
+
+typedef struct {
+    vexec_mode mode;
+} vexec_env_t;
+
 void child_out_readable_cb(struct ev_loop *loop, ev_io *w, int revents) {
+    vexec_env_t *env = (vexec_env_t *)ev_userdata(loop);
     char *buf[BUFSIZE];
     ssize_t size = read(w->fd, buf, BUFSIZE);
     if (size == 0) {
+        if (env->mode != VEXEC_MODE_NEITHER) {
+            fprintf(stdout, ANSI_COLOR_RESET);
+            env->mode = VEXEC_MODE_NEITHER;
+        }
         ev_io_stop(loop, w);
         return;
     } else if (size < 0) {
         if (EAGAIN == errno || EWOULDBLOCK == errno) {
             return;
         }
+        if (env->mode != VEXEC_MODE_NEITHER) {
+            fprintf(stdout, ANSI_COLOR_RESET);
+            env->mode = VEXEC_MODE_NEITHER;
+        }
         fprintf(stderr, "fread failed\n");
         ev_io_stop(loop, w);
         return;
     }
-    fprintf(stdout, ANSI_COLOR_GREEN);
+    if (env->mode != VEXEC_MODE_OUT) {
+        fprintf(stdout, ANSI_COLOR_GREEN);
+        env->mode = VEXEC_MODE_OUT;
+    }
     fwrite(buf, size, 1, stdout);
-    fprintf(stdout, ANSI_COLOR_RESET);
 }
 
 void child_err_readable_cb(struct ev_loop *loop, ev_io *w, int revents) {
+    vexec_env_t *env = (vexec_env_t *)ev_userdata(loop);
     char *buf[BUFSIZE];
     ssize_t size = read(w->fd, buf, BUFSIZE);
     if (size == 0) {
+        if (env->mode != VEXEC_MODE_NEITHER) {
+            fprintf(stdout, ANSI_COLOR_RESET);
+            env->mode = VEXEC_MODE_NEITHER;
+        }
         ev_io_stop(loop, w);
         return;
     } else if (size < 0) {
         if (EAGAIN == errno || EWOULDBLOCK == errno) {
             return;
         }
+        if (env->mode != VEXEC_MODE_NEITHER) {
+            fprintf(stdout, ANSI_COLOR_RESET);
+            env->mode = VEXEC_MODE_NEITHER;
+        }
         fprintf(stderr, "fread failed\n");
         ev_io_stop(loop, w);
         return;
     }
-    fprintf(stdout, ANSI_COLOR_RED);
+    if (env->mode != VEXEC_MODE_ERR) {
+        fprintf(stdout, ANSI_COLOR_RED);
+        env->mode = VEXEC_MODE_ERR;
+    }
     fwrite(buf, size, 1, stdout);
-    fprintf(stdout, ANSI_COLOR_RESET);
 }
 
 void child_status_change_cb(struct ev_loop *loop, ev_child *w, int revents) {
@@ -105,6 +137,10 @@ int main(int argc, char *argv[]) {
     close(fileno(stdin)); // stdin will be read by the child process
 
     struct ev_loop *loop = ev_default_loop(0);
+
+    vexec_env_t env;
+    env.mode = VEXEC_MODE_NEITHER;
+    ev_set_userdata(loop, &env);
 
     ev_io child_out_readable, child_err_readable;
     ev_child child_status_change;
