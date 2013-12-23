@@ -2,10 +2,14 @@
 
 color stdout in green and stderr in red.
 
+## requirement
+
+* libev
+
 ## build
 
 ```
-gcc vexec.c -Wall -o vexec
+gcc vexec.c -Wall -lev -o vexec
 ```
 
 ## usage
