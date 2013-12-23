@@ -23,6 +23,7 @@ typedef enum {
 
 typedef struct {
     vexec_mode mode;
+    int exit_status;
 } vexec_env_t;
 
 void child_out_readable_cb(struct ev_loop *loop, ev_io *w, int revents) {
@@ -86,6 +87,15 @@ void child_err_readable_cb(struct ev_loop *loop, ev_io *w, int revents) {
 }
 
 void child_status_change_cb(struct ev_loop *loop, ev_child *w, int revents) {
+    vexec_env_t *env = (vexec_env_t *)ev_userdata(loop);
+    if (WIFEXITED(w->rstatus)) {
+        env->exit_status = WEXITSTATUS(w->rstatus);
+    } else if (WIFSIGNALED(w->rstatus)) {
+        env->exit_status = 0;
+    } else {
+        fprintf(stderr, "process terminated abnormally\n");
+        env->exit_status = 1;
+    }
     ev_child_stop(loop, w);
 }
 
@@ -139,6 +149,7 @@ int main(int argc, char *argv[]) {
     struct ev_loop *loop = ev_default_loop(0);
 
     vexec_env_t env;
+    env.exit_status = 0;
     env.mode = VEXEC_MODE_NEITHER;
     ev_set_userdata(loop, &env);
 
@@ -155,6 +166,6 @@ int main(int argc, char *argv[]) {
 
     ev_run(loop, 0);
 
-    return 0;
+    return env.exit_status;
 }
 
